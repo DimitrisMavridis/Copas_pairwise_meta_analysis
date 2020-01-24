@@ -1,0 +1,103 @@
+Copas.model=function(l1,l2,u1,u2,y,s,N)
+  
+{
+  
+  #JAGS code used in the paper "Mavridis D, Sutton A, Cipriani A, Salanti G. A fully Bayesian application of the Copas selection model for publication bias extended to network meta-analysis. Statistics in Medicine 2013; 32(1):51-66."
+  
+ 
+  # The model consists of two parts. A measurement model y_i~N(μ,s_i^2+τ^2) and a selection model which defines the mechanism by which studies are selected for publication
+  # Associated with each observed effect size y_i is a latent variable z_i, which assumes positive values for observed effect sizes
+  # This latent variable express the propensity for publication and we assume that z_i=alpha+beta/s_i + d_i, where d_i~N(0,1)
+  # the measurement and selection models are correlated because we set cor(y_i,z_i)=rho. If this correlation is zero then the magnitude of the effect size is independent of the probability of publication; there is no publication bias  
+  
+  #The code requires study-level data. The observed effect sizes from N studies (y) and the corresponding standard errors (s)
+  
+  #We also need to assign two probability distributions, one for observing the largest study in the sample and one for the smallest study in the sample. The smallest study has a Uniform distribution on [L1,L2] and the largest study has a Uniform distribution on [U1,U2]  
+  
+  
+  lower~dunif(l1,l2)
+  upper~dunif(u1,u2)
+  smin<-min(s[])
+  smax<-max(s[])
+  
+  
+  invNCDFU<-5.531*(pow((1-upper)/upper,0.1193)-1)*step(0.5-upper)-5.531*(pow((1-upper)/upper,0.1193)-1)*step(upper-0.5)
+  
+  invNCDFL<-5.531*(pow(lower/(1-lower),0.1193)-1)*step(0.5-lower)-5.531*(pow((lower)/(1-lower),0.1193)-1)*step(lower-0.5)
+  
+  
+  # estimate alpha and beta based on the probability distributions for observing the largest and smallest studies 
+  beta<-(invNCDFL-invNCDFU)/(1/smax-1/smin)
+  
+  alpha<-invNCDFU-beta/smin
+  
+  
+  for(i in 1:N){
+    
+    u[i]<-alpha+beta/s[i]
+    
+    # estimate the probability of publication for each study
+    prob.pub[i]<-phi(u[i])
+    # estimate the total number of studies (published and unpublished) with standard error s[i]
+    pub.stud[i]<-1/prob.pub[i]
+  }
+  
+  for(i in 1:N){
+    
+    # selection model
+    z[i]~dnorm(u[i],1) %_% T(0,)
+
+    y[i]~dnorm(my[i],w[i])
+    
+    
+    
+    # conditional distribution of y|z>0
+    
+    my[i]<-mu[i]+rho*s[i]*(z[i]-u[i])
+    
+    
+    
+    vy[i]<-pow(s[i],2)*(1-pow(rho,2))
+    
+    w[i]<-1/vy[i]
+    
+    mu[i]~dnorm(mean,prec)
+  }
+  
+  
+  rho1~dunif(0,2)
+  rho<-rho1-1
+  
+  mean~dnorm(0,0.0001)
+  prec<-1/pow(tau,2)                  
+  tau~dunif(0,2)      
+  
+  # estimated total number of studies
+  tot.pub<-sum(pub.stud[1:N])
+  
+}
+
+
+# Turner example : 50 randomised placebo control trials comparing antidepressants to placebo, published in scientific journals
+
+y=c(0.269742,0.3164596,0.2474634,0.4269396,0.395872,0.3942015,0.5574585,0.4326138,0.2773137,0.4968784,0.3199672,0.3199229,0.3537735,0.4034205,0.7550544,0.268133,0.3642578,0.0151255,0.5151265,0.762831,0.6203963,0.470375,0.5411536,0.6748119,0.3665797,0.4637128,0.3783634,0.3899649,0.6220149,0.5795371,0.6871751,0.8395159,0.7278378,0.5187855,0.6058415,0.7381631,0.4683938,0.2484467,0.501093,0.3719997,0.3464183,0.4468546,0.3842469,0.4756994,0.8431283,0.6085268,0.4535774,0.3137843,0.482147,0.5315622)
+
+s=c(0.1316252,0.1500209,0.0985828,0.2190233,0.2030172,0.1310724,0.1289525,0.1317574,0.1230928,0.191084,0.124115,0.1036659,0.1146689,0.1130488,0.3001881,0.1068863,0.156185,0.1456089,0.3170791,0.2290119,0.2101886,0.2048626,0.2112458,0.280094,0.2477782,0.2149076,0.1631805,0.1518269,0.2278142,0.2023744,0.2691268,0.2572312,0.2371654,0.2451312,0.2260609,0.2405774,0.2407052,0.2471605,0.3175503,0.1382665,0.0979737,0.1203734,0.1344884,0.1247038,0.2166139,0.1725341,0.1716489,0.1606124,0.1469203,0.1474331)
+l1=0.4
+l2=0.5
+u1=0.7
+u2=0.8
+N=50
+
+mydata<-list(y=y,s=s,l1=l1,l2=l2,u1=u1,u2=u2,N=N)
+inits<-list(rho=0,mean=0,tau=0.1)
+
+library(R2jags)
+library(rjags)
+
+CopasJAGS<- jags(data=mydata, inits = NULL,
+                 parameters.to.save = c("mean","rho","tau"), n.chains = 1, n.iter = 100000,
+                 n.burnin = 10000,DIC=F,
+                 model.file = Copas.model)
+print(CopasJAGS)
+traceplot(CopasJAGS)
